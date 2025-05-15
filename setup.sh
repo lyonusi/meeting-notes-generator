@@ -70,10 +70,31 @@ else
     echo "Please ensure your AWS credentials are configured."
 fi
 
-# Make main.py executable
+# Make main.py and demo.py executable
 chmod +x main.py
+chmod +x demo.py
+
+# Check for tkinter installation (needed for version management UI)
+echo "Checking for tkinter (required for version management UI)..."
+python3 -c "import tkinter" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "WARNING: tkinter is not installed, which is required for the version management UI."
+    echo "On macOS: Install python-tk using Homebrew:"
+    echo "  brew install python-tk"
+    echo "On Ubuntu/Debian: Install python3-tk package:"
+    echo "  sudo apt-get install python3-tk"
+    echo "On Fedora: Install python3-tkinter package:"
+    echo "  sudo dnf install python3-tkinter"
+else
+    echo "tkinter is installed correctly."
+fi
+
+# Create metadata directory for version management
+mkdir -p "notes/metadata"
+echo "Created version management metadata directory."
 
 echo ""
 echo "Setup completed!"
 echo "To run the application: ./main.py"
+echo "To run the demo with version management features: ./demo.py --file path/to/audio.wav --show-versions"
 echo "See README.md for detailed usage instructions."

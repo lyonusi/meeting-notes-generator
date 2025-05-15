@@ -1,6 +1,6 @@
 # Meeting Notes Generator
 
-A macOS application that records audio during meetings and automatically generates structured meeting notes.
+A macOS application that records audio during meetings and automatically generates structured meeting notes with comprehensive version management capabilities.
 
 ## Features
 
@@ -11,6 +11,19 @@ A macOS application that records audio during meetings and automatically generat
 - Simple UI to start, pause, resume, and stop recordings
 - Retry transcription if it fails with different services
 - Regenerate notes with different AI models
+- **Version management system for notes and transcriptions**:
+  - Track multiple versions of notes and transcripts
+  - Compare different versions side-by-side with diff highlighting
+  - Visual timeline of version history
+  - Mark default versions for each meeting
+  - Add comments to versions for context
+- **Direct editing capabilities**:
+  - Edit notes directly in the interface
+  - Save changes with keyboard shortcuts (Ctrl+S/⌘S)
+  - Auto-versioning on regeneration or retranscription
+- **Enhanced batch operations**:
+  - Select multiple meetings at once
+  - Delete/manage in batches
 
 ## Requirements
 
@@ -30,7 +43,7 @@ A macOS application that records audio during meetings and automatically generat
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/meeting-notes-generator.git
+git clone https://github.com/lyonusi/meeting-notes-generator.git
 cd meeting-notes-generator
 ```
 
@@ -117,11 +130,61 @@ python main.py --debug
 - Save notes to a specific location using "Save Notes As..."
 - Copy notes to clipboard using "Copy to Clipboard"
 - View the full transcript by clicking "View Transcript"
+- Edit notes directly in the interface and save with Ctrl+S/⌘S
 
 ### Previous recordings
 
 - Access previous recordings from the "Previous Recordings" section
 - Double-click any entry to open it
+- Select multiple items for batch operations
+- Use keyboard shortcuts (Delete/Backspace) for quick deletion
+
+### Using the Version Management System
+
+The version management system allows you to track and compare different versions of transcripts and notes for the same meeting:
+
+1. **Accessing Versions**:
+   - Click on a meeting in the list to select it
+   - Navigate to the "Versions" tab in the right panel
+   - All versions of the selected meeting will be displayed
+
+2. **Comparing Versions**:
+   - Select two versions in the list (hold Ctrl/⌘ for multiple selection)
+   - Click "Compare Selected" to view a side-by-side comparison
+   - The comparison view shows both versions and highlights differences
+
+3. **Managing Versions**:
+   - Right-click on a version for additional options:
+     - Set as Default: Mark a version as the default version
+     - Rename Version: Give the version a custom name
+     - Add Comments: Add notes or context about this version
+     - Compare with Default: Compare with the current default version
+     - Delete Version: Remove a version from history
+
+4. **Timeline View**:
+   - Click "View Timeline" to see a visual representation of version history
+   - The timeline shows when each version was created and which tools were used
+
+5. **Creating New Versions**:
+   - Use the "Regenerate Notes" button to create a new version with different AI models
+   - Use the "Retranscribe" button to create a new version with different transcription services
+   - Version numbers (_v2, _v3, etc.) are automatically assigned
+
+## Running the Demo
+
+The included demo script provides a quick way to test the functionality:
+
+```bash
+python demo.py --file path/to/audio_file.wav
+```
+
+This will process the audio file, generate a transcript and notes, and save them to the notes directory.
+
+Add the `--show-versions` flag to demonstrate the version management features:
+
+```bash
+python demo.py --file path/to/audio_file.wav --show-versions
+```
 
 ## Local Notes Generation Options
 
@@ -154,6 +217,9 @@ For notes generation without external services, consider:
 - Native macOS app with improved UI
 - Enhanced audio processing
 - Integrated local AI models support
+- Version merging capabilities
+- Export version history as reports
+- Cloud synchronization of version metadata
 
 ## License
 
