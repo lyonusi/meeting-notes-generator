@@ -1,0 +1,18 @@
+# Core requirements
+boto3>=1.28.0
+pyaudio>=0.2.13
+numpy>=1.24.0
+
+# Transcription options (uncomment preferred option)
+# Option 1: OpenAI Whisper API
+openai>=1.0.0
+
+# Option 2: Local Whisper model (CPU/GPU)
+openai-whisper>=20231117
+# torch>=2.0.0
+
+# Option 3: Faster Whisper (recommended for local transcription)
+faster-whisper>=0.9.0
+
+# The following dependencies are typically included with Python but listed for completeness
+# tkinter (built-in)
