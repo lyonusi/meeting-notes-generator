@@ -31,9 +31,10 @@ A macOS application that records audio during meetings and automatically generat
 - For AWS services (optional):
   - AWS Account with access to:
     - AWS Transcribe
-    - AWS Bedrock
+    - AWS Bedrock (with Anthropic Claude models enabled)
     - Amazon S3
   - Valid AWS credentials
+  - Inference profiles for newer Claude models (Claude Sonnet 4, Claude 3.7)
 - For local transcription:
   - OpenAI Whisper (included in requirements.txt)
   - faster-whisper (included in requirements.txt)
@@ -69,12 +70,18 @@ Ensure your AWS credentials are configured in one of the following ways:
   [default]
   aws_access_key_id = YOUR_ACCESS_KEY
   aws_secret_access_key = YOUR_SECRET_KEY
+  
+  [bedrock]
+  aws_access_key_id = YOUR_BEDROCK_ACCESS_KEY
+  aws_secret_access_key = YOUR_BEDROCK_SECRET_KEY
   ```
 - Environment variables:
   ```bash
   export AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY
   export AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY
   ```
+
+**Note:** The application uses separate profiles for different AWS services. By default, it uses the "default" profile for S3 and Transcribe, and the "bedrock" profile for AWS Bedrock API calls. You can modify this in the code if needed.
 
 ### 4. Configure the application
 
@@ -169,6 +176,48 @@ The version management system allows you to track and compare different versions
    - Use the "Regenerate Notes" button to create a new version with different AI models
    - Use the "Retranscribe" button to create a new version with different transcription services
    - Version numbers (_v2, _v3, etc.) are automatically assigned
+
+## AWS Bedrock Inference Profiles
+
+Newer Claude models (like Claude Sonnet 4 and Claude 3.7) require inference profiles in AWS Bedrock. This application supports dynamic inference profile handling:
+
+### What are Inference Profiles?
+
+Inference profiles in AWS Bedrock provide dedicated throughput for foundation models. They're required for newer Claude models and ensure stable API access.
+
+### Setting up Inference Profiles
+
+1. In your AWS Bedrock console, navigate to "Inference profiles"
+2. Click "Create inference profile"
+3. Select the model (e.g., "Claude Sonnet 4")
+4. Choose your provisioned throughput settings
+5. Complete the creation process
+
+### Testing Inference Profiles
+
+Use the included test script to verify your inference profile setup:
+
+```bash
+python test_inference_profile.py
+```
+
+This script will:
+- List all available inference profiles in your account
+- Check if a profile exists for the model in your config
+- Test a simple generation task using the profile
+
+You can specify a different AWS profile or model:
+
+```bash
+python test_inference_profile.py --profile my-aws-profile --model anthropic.claude-sonnet-4-20250514-v1:0
+```
+
+### Dynamic Profile ARN Construction
+
+The application attempts to dynamically construct profile ARNs if no matching profile is found in your account. This works if:
+
+1. You have the same model enabled in different AWS accounts
+2. The inference profile follows the standard naming pattern 
 
 ## Running the Demo
 

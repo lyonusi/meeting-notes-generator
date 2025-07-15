@@ -43,6 +43,13 @@ class AWSHandler:
         logger.info(f"Using default profile for S3 and Transcribe")
         logger.info(f"Using '{bedrock_profile}' profile for Bedrock API")
         
+        # Cache AWS account ID
+        self.aws_account_id = self._get_aws_account_id()
+        
+        # Cache inference profiles at initialization
+        self.inference_profiles = {}
+        self.refresh_inference_profiles_cache()
+        
         # Ensure S3 bucket exists
         self._ensure_bucket_exists()
     
@@ -345,44 +352,29 @@ class AWSHandler:
                 ]
             }
             
-            # Check if this model requires an inference profile (Claude 3.7 models)
-            try_with_profile = False
-            profile_arn = None
+            # Check if this model requires an inference profile (for newer models like Claude 3.7, Sonnet 4, etc.)
+            needs_profile = any(model_type in used_model_id.lower() for model_type in ['claude-3-7', 'claude-sonnet-4'])
             
-            if 'claude-3-7' in used_model_id.lower():
-                profile_arn = self.get_model_inference_profile(used_model_id)
+            # Key discovery from AWS docs: For models that need inference profiles,
+            # we don't use a separate parameter. Instead, we REPLACE the modelId with the inference profile ARN!
+            effective_model_id = used_model_id
+            
+            if needs_profile:
+                profile_arn = self.get_inference_profile_for_model(used_model_id)
                 if profile_arn:
-                    try_with_profile = True
-                    logger.info(f"Using inference profile for {used_model_id}")
+                    # Replace the model ID with the inference profile ARN
+                    effective_model_id = profile_arn
+                    logger.info(f"Using inference profile ARN as model ID: {effective_model_id}")
+                else:
+                    logger.warning(f"No inference profile found for {used_model_id}, using base model ID")
             
             try:
-                # First try using inference profile if available and needed
-                if try_with_profile and profile_arn:
-                    try:
-                        response = self.bedrock_runtime.invoke_model_with_response_stream(
-                            modelId=used_model_id,
-                            inferenceProfileArn=profile_arn,
-                            contentType="application/json",
-                            accept="application/json",
-                            body=json.dumps(request_body)
-                        )
-                        # Process streaming response
-                        stream = response['body']
-                        generated_text = ""
-                        for event in stream:
-                            if 'chunk' in event:
-                                chunk = json.loads(event['chunk']['bytes'].decode())
-                                generated_text += chunk['content'][0]['text']
-                        
-                        logger.info("Meeting notes generated successfully using inference profile.")
-                        return generated_text
-                    except Exception as profile_error:
-                        logger.warning(f"Failed to use inference profile: {profile_error}")
-                        # Fall back to standard invoke
+                # Standard invoke_model with the effective model ID (which may be the inference profile ARN)
+                logger.info(f"Invoking model with effective model ID: {effective_model_id}")
                 
-                # Try standard invoke_model
+                # Use the effective model ID (which may be the inference profile ARN)
                 response = self.bedrock_runtime.invoke_model(
-                    modelId=used_model_id,
+                    modelId=effective_model_id,
                     contentType="application/json",
                     accept="application/json",
                     body=json.dumps(request_body)
@@ -436,6 +428,44 @@ Meeting transcript captured successfully. AI-generated notes are not available.
 """
         return notes
         
+    def _get_aws_account_id(self):
+        """Get the AWS account ID from the current session.
+        
+        Returns:
+            AWS account ID as string or None if it cannot be determined.
+        """
+        try:
+            sts_client = self.bedrock_session.client('sts')
+            account_id = sts_client.get_caller_identity()["Account"]
+            logger.info(f"Using AWS account ID: {account_id}")
+            return account_id
+        except Exception as e:
+            logger.warning(f"Could not determine AWS account ID: {e}")
+            return None
+            
+    def refresh_inference_profiles_cache(self):
+        """Fetch and cache all available inference profiles."""
+        try:
+            response = self.bedrock_client.list_inference_profiles()
+            profiles = response.get('inferenceProfiles', [])
+            
+            # Build a model_id -> profile_arn mapping
+            self.inference_profiles = {}
+            for profile in profiles:
+                model_id = profile.get('modelId', '')
+                profile_arn = profile.get('inferenceProfileArn', '')
+                if model_id and profile_arn:
+                    self.inference_profiles[model_id] = profile_arn
+                    
+            logger.info(f"Cached {len(self.inference_profiles)} inference profiles")
+            
+            # Log available profiles for debugging
+            for model_id, arn in self.inference_profiles.items():
+                logger.debug(f"Available inference profile: {model_id} -> {arn}")
+                
+        except Exception as e:
+            logger.warning(f"Could not cache inference profiles: {e}")
+    
     def get_inference_profiles(self):
         """Get available inference profiles.
         
@@ -451,6 +481,65 @@ Meeting transcript captured successfully. AI-generated notes are not available.
             logger.warning(f"Could not get inference profiles: {e}")
             return []
     
+    def get_inference_profile_for_model(self, model_id):
+        """Get the inference profile ARN for a specific model.
+        
+        This method first checks the cached profiles, then attempts to find a direct match
+        in the available profiles. If no direct match is found, it tries to construct a
+        profile ARN based on the account ID and model pattern.
+        
+        Args:
+            model_id: The model ID to find a profile for.
+            
+        Returns:
+            Inference profile ARN or None if it cannot be determined.
+        """
+        # Check if we have a cached profile for this exact model
+        if model_id in self.inference_profiles:
+            profile_arn = self.inference_profiles[model_id]
+            logger.info(f"Using cached inference profile for {model_id}: {profile_arn}")
+            return profile_arn
+        
+        # If we don't have an exact match, try to refresh the cache
+        # This handles cases where profiles were added since initialization
+        logger.info(f"No cached inference profile for {model_id}, refreshing cache")
+        self.refresh_inference_profiles_cache()
+        
+        # Check again after refresh
+        if model_id in self.inference_profiles:
+            profile_arn = self.inference_profiles[model_id]
+            logger.info(f"Found inference profile after refresh: {profile_arn}")
+            return profile_arn
+        
+        # If still no match, try to dynamically construct an ARN if we have the account ID
+        if self.aws_account_id:
+            # Map model IDs to their inference profile suffixes
+            model_profile_mapping = {
+                "anthropic.claude-sonnet-4-20250514-v1:0": "us.anthropic.claude-sonnet-4-20250514-v1:0"
+            }
+            
+            # For models that might follow a pattern, dynamically construct the suffix
+            if 'claude-sonnet-4' in model_id.lower() and model_id not in model_profile_mapping:
+                # Extract the base name and version from the model ID
+                parts = model_id.split('-')
+                if len(parts) >= 4:
+                    # Construct a profile suffix based on the model pattern
+                    model_profile_mapping[model_id] = f"us.{model_id}"
+                    logger.info(f"Created mapping for unknown model: {model_id} -> {model_profile_mapping[model_id]}")
+                    
+            # Get the profile suffix for this model
+            profile_suffix = model_profile_mapping.get(model_id)
+            if profile_suffix:
+                # Construct the ARN
+                arn = f"arn:aws:bedrock:{AWS_REGION}:{self.aws_account_id}:inference-profile/{profile_suffix}"
+                logger.info(f"Dynamically constructed inference profile ARN: {arn}")
+                # Add to cache for future use
+                self.inference_profiles[model_id] = arn
+                return arn
+        
+        logger.warning(f"No inference profile found for {model_id}")
+        return None
+        
     def get_model_inference_profile(self, model_id):
         """Find an inference profile for a specific model.
         
@@ -460,14 +549,9 @@ Meeting transcript captured successfully. AI-generated notes are not available.
         Returns:
             Inference profile ARN or None if no match found.
         """
-        profiles = self.get_inference_profiles()
-        
-        for profile in profiles:
-            profile_model_id = profile.get('modelId', '')
-            if model_id == profile_model_id:
-                return profile.get('inferenceProfileArn')
-                
-        return None
+        # For backward compatibility, redirect to the new method
+        logger.info(f"Using legacy get_model_inference_profile for {model_id}, redirecting to get_inference_profile_for_model")
+        return self.get_inference_profile_for_model(model_id)
     
     def list_available_models(self):
         """Get available Bedrock models.
@@ -501,25 +585,38 @@ Meeting transcript captured successfully. AI-generated notes are not available.
                 if 'anthropic' in model_id.lower() and 'claude' in model_id.lower():
                     display_name = model.get('modelName', model_id)
                     
-                    # For Claude 3.7 models, indicate if they need inference profiles
-                    if 'claude-3-7' in model_id.lower():
-                        profile_arn = self.get_model_inference_profile(model_id)
+                    # Check if model needs inference profile
+                    models_needing_profiles = ['claude-3-7', 'claude-sonnet-4']
+                    needs_profile = any(model_type in model_id.lower() for model_type in models_needing_profiles)
+                    
+                    if needs_profile:
+                        # Use the enhanced method to check for profile
+                        profile_arn = self.get_inference_profile_for_model(model_id)
+                        
                         if profile_arn:
+                            # Extract account ID from the ARN for display
+                            arn_parts = profile_arn.split(':')
+                            account_display = ''
+                            if len(arn_parts) > 4:
+                                account_id = arn_parts[4]
+                                # Only show last 4 digits for security
+                                account_display = f" (Account: ...{account_id[-4:]})"
+                            
                             # This model has an inference profile available
                             claude_models.append({
                                 'id': model_id,
-                                'name': f"{display_name} (With Inference Profile)",
+                                'name': f"{display_name} [With Inference Profile{account_display}]",
                                 'profile_arn': profile_arn
                             })
                         else:
-                            # This model might not work without an inference profile
+                            # This model might need an inference profile but none found
                             claude_models.append({
                                 'id': model_id,
-                                'name': f"{display_name} (May Require Inference Profile)"
+                                'name': f"{display_name} [Requires Inference Profile - NOT FOUND]",
+                                'warning': "This model requires an inference profile that is not available."
                             })
                     else:
-                        # Regular Claude model
-                        # Show full model ID in display name
+                        # Regular Claude model that doesn't need inference profile
                         claude_models.append({
                             'id': model_id,
                             'name': f"{display_name} ({model_id})"

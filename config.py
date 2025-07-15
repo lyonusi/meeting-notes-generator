@@ -23,8 +23,11 @@ WINDOW_HEIGHT = 600
 RECORDINGS_DIR = "recordings"
 
 # AWS Bedrock model settings
-# BEDROCK_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0"  # Change as needed
-BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"  # Default model
+# Previous models
+# BEDROCK_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0"
+# BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+# Using latest Claude Sonnet 4 model (requires inference profile)
+BEDROCK_MODEL_ID = "anthropic.claude-sonnet-4-20250514-v1:0"  # Default model
 
 # Transcription settings
 TRANSCRIPTION_SERVICE = "whisper"  # Options: "aws", "whisper", "mac"

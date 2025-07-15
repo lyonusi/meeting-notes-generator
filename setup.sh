@@ -70,9 +70,10 @@ else
     echo "Please ensure your AWS credentials are configured."
 fi
 
-# Make main.py and demo.py executable
+# Make scripts executable
 chmod +x main.py
 chmod +x demo.py
+chmod +x test_profile.sh
 
 # Check for tkinter installation (needed for version management UI)
 echo "Checking for tkinter (required for version management UI)..."
@@ -93,8 +94,37 @@ fi
 mkdir -p "notes/metadata"
 echo "Created version management metadata directory."
 
+# Check for AWS Bedrock access and inference profiles if AWS CLI is available
+if command -v aws &> /dev/null; then
+    echo "Checking AWS Bedrock access..."
+    AWS_PROFILE=${AWS_PROFILE:-"bedrock"}
+    
+    # Try to list Bedrock models (this will fail gracefully if no access)
+    aws bedrock list-foundation-models --profile "$AWS_PROFILE" &> /dev/null
+    if [ $? -eq 0 ]; then
+        echo "AWS Bedrock access confirmed."
+        echo "Checking for inference profiles..."
+        aws bedrock list-inference-profiles --profile "$AWS_PROFILE" &> /dev/null
+        if [ $? -eq 0 ]; then
+            NUM_PROFILES=$(aws bedrock list-inference-profiles --profile "$AWS_PROFILE" --query 'inferenceProfiles | length(@)' --output text)
+            if [ "$NUM_PROFILES" -gt 0 ]; then
+                echo "Found $NUM_PROFILES inference profiles."
+            else
+                echo "No inference profiles found. You may need to create them for newer Claude models."
+                echo "See README.md for detailed instructions on inference profiles."
+            fi
+        else
+            echo "Unable to check inference profiles. Make sure your AWS credentials have bedrock:ListInferenceProfiles permission."
+        fi
+    else
+        echo "AWS Bedrock access not detected or not authorized."
+        echo "To use Claude models, ensure your AWS account has Bedrock access."
+    fi
+fi
+
 echo ""
 echo "Setup completed!"
 echo "To run the application: ./main.py"
 echo "To run the demo with version management features: ./demo.py --file path/to/audio.wav --show-versions"
+echo "To test your inference profile setup: ./test_profile.sh [aws-profile-name]"
 echo "See README.md for detailed usage instructions."
