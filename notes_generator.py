@@ -6,7 +6,6 @@ This module handles processing transcriptions and generating meeting notes.
 import os
 import json
 import logging
-import shutil
 from datetime import datetime
 
 from aws_services import AWSHandler
@@ -347,13 +346,10 @@ class NotesGenerator:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         try:
-            # Check if we already have a local copy
-            local_copy_path = os.path.join(self.notes_dir, f"local_recording_{timestamp}.wav")
-            
-            if not os.path.exists(local_copy_path) or not os.path.samefile(audio_file_path, local_copy_path):
-                # Only make a copy if we don't already have one or if it's a different file
-                shutil.copy2(audio_file_path, local_copy_path)
-                logger.info(f"Local copy saved to {local_copy_path}")
+            # Note: We intentionally do NOT copy the recording into the notes
+            # directory. The original recording already lives in the recordings
+            # folder, and the notes folder is synced to a git-backed Obsidian
+            # vault where large .wav files cause repo bloat and push failures.
             
             # Get the appropriate transcription service
             transcription_service = self._get_transcription_service()
