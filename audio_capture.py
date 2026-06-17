@@ -28,7 +28,16 @@ class AudioRecorder:
         self.start_time = None
         self.recording_thread = None
         self.recording_filename = None
-        
+
+        # Error / quality state surfaced to the UI after a recording
+        self.last_error = None        # str message if start/record failed
+        self.was_silent = False       # True if captured audio was effectively silent
+        self.peak_amplitude = 0       # peak abs sample value seen during recording
+
+        # Silence detection threshold (abs int16 sample value, 0-32767).
+        # Anything below this for the whole recording is treated as silence.
+        self.silence_threshold = 30
+
         # Ensure recordings directory exists
         os.makedirs(RECORDINGS_DIR, exist_ok=True)
         
@@ -173,16 +182,82 @@ class AudioRecorder:
     def set_output_device(self, device_index):
         """Set the output device to use for recording."""
         self.device_info["output"] = device_index
+
+    def validate_input_device(self, device_index=None):
+        """Check that a device can actually be used to capture audio.
+
+        Returns a tuple (ok, message). ok is False when the device cannot
+        capture (no input channels, missing, or the audio backend rejects the
+        format). message is a human-readable explanation when ok is False.
+        """
+        if device_index is None:
+            device_index = self.device_info.get("input")
+
+        if device_index is None:
+            return False, "No input device selected."
+
+        try:
+            info = self.pyaudio.get_device_info_by_index(device_index)
+        except Exception:
+            return False, "Selected input device is no longer available."
+
+        max_in = int(info.get("maxInputChannels", 0))
+        if max_in < 1:
+            return False, (
+                f"'{info.get('name', 'This device')}' has no input channels, so it "
+                f"cannot record audio. Pick a device listed as an input/microphone. "
+                f"To capture system or meeting audio you need a loopback device "
+                f"(e.g. BlackHole) selected as the input."
+            )
+
+        # Confirm the backend actually supports opening this device for input.
+        channels = min(CHANNELS, max_in) or 1
+        try:
+            supported = self.pyaudio.is_format_supported(
+                RATE,
+                input_device=device_index,
+                input_channels=channels,
+                input_format=pyaudio.paInt16,
+            )
+            if not supported:
+                return False, (
+                    f"'{info.get('name', 'This device')}' does not support the "
+                    f"required audio format ({RATE} Hz, {channels} ch)."
+                )
+        except Exception as e:
+            return False, (
+                f"'{info.get('name', 'This device')}' cannot be opened for "
+                f"recording: {e}"
+            )
+
+        return True, ""
     
     def start_recording(self):
-        """Start recording audio."""
+        """Start recording audio.
+
+        Returns True if recording started (or resumed). Returns False if it
+        could not start; check self.last_error for the reason.
+        """
         if self.recording:
             if self.paused:
                 self.paused = False
                 print("Recording resumed")
                 return True
             return False  # Already recording and not paused
-        
+
+        # Validate the selected input device before we start so the user gets
+        # immediate feedback instead of a silent recording.
+        ok, message = self.validate_input_device()
+        if not ok:
+            self.last_error = message
+            print(f"Cannot start recording: {message}")
+            return False
+
+        # Reset state for a fresh recording
+        self.last_error = None
+        self.was_silent = False
+        self.peak_amplitude = 0
+
         self.recording = True
         self.paused = False
         self.audio_frames = []
@@ -230,7 +305,18 @@ class AudioRecorder:
             # Get device info to check channel support
             input_device_info = self.pyaudio.get_device_info_by_index(self.device_info["input"])
             max_channels = int(input_device_info["maxInputChannels"])
-            
+
+            if max_channels < 1:
+                # Should have been caught by validate_input_device, but guard anyway.
+                self.last_error = (
+                    f"'{input_device_info.get('name', 'Device')}' has no input "
+                    f"channels and cannot record."
+                )
+                print(self.last_error)
+                self.recording = False
+                self._channels_used = CHANNELS
+                return
+
             # Adjust channels if device doesn't support the configured number
             channels_to_use = min(CHANNELS, max_channels)
             if channels_to_use != CHANNELS:
@@ -251,6 +337,7 @@ class AudioRecorder:
             # Store the actual channels used for saving the file
             self._channels_used = channels_to_use
             recording_successful = False
+            peak = 0
             
             while self.recording:
                 if not self.paused:
@@ -258,6 +345,15 @@ class AudioRecorder:
                         data = stream.read(CHUNK, exception_on_overflow=False)
                         self.audio_frames.append(data)
                         recording_successful = True  # Mark as successful if we get at least some data
+                        # Track the loudest sample so we can detect silence.
+                        try:
+                            samples = np.frombuffer(data, dtype=np.int16)
+                            if samples.size:
+                                chunk_peak = int(np.abs(samples).max())
+                                if chunk_peak > peak:
+                                    peak = chunk_peak
+                        except Exception:
+                            pass
                     except Exception as e:
                         print(f"Error reading audio chunk: {e}")
                 else:
@@ -265,12 +361,22 @@ class AudioRecorder:
             
             stream.stop_stream()
             stream.close()
-            
+
+            self.peak_amplitude = peak
+            self.was_silent = recording_successful and peak < self.silence_threshold
+
             if not recording_successful:
-                print("Warning: No audio data was captured during recording")
+                self.last_error = "No audio data was captured during recording."
+                print(f"Warning: {self.last_error}")
+            elif self.was_silent:
+                print(
+                    f"Warning: captured audio appears silent (peak amplitude "
+                    f"{peak} < threshold {self.silence_threshold})."
+                )
             
         except Exception as e:
             print(f"Error during recording: {e}")
+            self.last_error = f"Error during recording: {e}"
             self.recording = False
             self._channels_used = CHANNELS  # Fallback to default
     

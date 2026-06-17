@@ -102,13 +102,6 @@ class MainWindow:
                 except (ValueError, IndexError, AttributeError):
                     pass
                 
-            if hasattr(self, 'output_device_var'):
-                output_selection = self.output_device_combo.get()
-                try:
-                    self.settings["output_device"] = int(output_selection.split(":")[0])
-                except (ValueError, IndexError, AttributeError):
-                    pass
-                
             if hasattr(self, 'transcription_combo') and hasattr(self, 'available_services'):
                 service_name = self.transcription_combo.get()
                 if service_name in self.available_services:
@@ -191,7 +184,7 @@ class MainWindow:
         input_frame = ttk.Frame(self.device_frame)
         input_frame.pack(fill=tk.X, expand=True, pady=5)
         
-        ttk.Label(input_frame, text="Input Device:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(input_frame, text="Recording Source:").pack(side=tk.LEFT, padx=5)
         
         # Input device combobox
         self.input_device_var = tk.StringVar()
@@ -221,41 +214,6 @@ class MainWindow:
             self.input_device_combo.current(0)
             
         self.input_device_combo.bind("<<ComboboxSelected>>", self._on_input_device_changed)
-        
-        # Output device selection
-        output_frame = ttk.Frame(self.device_frame)
-        output_frame.pack(fill=tk.X, expand=True, pady=5)
-        
-        ttk.Label(output_frame, text="Output Device:").pack(side=tk.LEFT, padx=5)
-        
-        # Output device combobox
-        self.output_device_var = tk.StringVar()
-        self.output_device_combo = ttk.Combobox(
-            output_frame,
-            textvariable=self.output_device_var,
-            state="readonly",
-            width=40
-        )
-        self.output_device_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Populate output devices
-        output_devices = [(idx, name) for idx, name in devices["output"]]
-        self.output_device_combo["values"] = [f"{idx}: {name}" for idx, name in output_devices]
-        
-        # Use saved output device or default to first
-        output_idx = self.settings.get("output_device", None)
-        if output_idx is not None and output_devices:
-            # Find the index in the combobox that matches the saved device
-            combo_idx = 0
-            for i, (idx, _) in enumerate(output_devices):
-                if idx == output_idx:
-                    combo_idx = i
-                    break
-            self.output_device_combo.current(combo_idx)
-        elif output_devices:
-            self.output_device_combo.current(0)
-            
-        self.output_device_combo.bind("<<ComboboxSelected>>", self._on_output_device_changed)
         
         # Create service selection notebook
         service_notebook = ttk.Notebook(self.device_frame)
@@ -342,15 +300,10 @@ class MainWindow:
         try:
             device_idx = int(selection.split(":")[0])
             self.recorder.set_input_device(device_idx)
-        except (ValueError, IndexError):
-            pass
-    
-    def _on_output_device_changed(self, event):
-        """Handle output device selection change."""
-        selection = self.output_device_combo.get()
-        try:
-            device_idx = int(selection.split(":")[0])
-            self.recorder.set_output_device(device_idx)
+            # Give immediate feedback if this device can't actually capture audio.
+            ok, message = self.recorder.validate_input_device(device_idx)
+            if not ok:
+                messagebox.showwarning("Input device may not record", message)
         except (ValueError, IndexError):
             pass
     
@@ -1675,6 +1628,13 @@ class MainWindow:
         """Start or resume recording."""
         if self.recorder.start_recording():
             self.progress_frame.update_progress("Recording in progress...", 0)
+        else:
+            # start_recording returned False — show why if we have a reason.
+            error = getattr(self.recorder, "last_error", None)
+            if error:
+                self.recording_controls.reset()
+                self.progress_frame.reset()
+                messagebox.showerror("Cannot start recording", error)
     
     def _pause_recording(self):
         """Pause recording."""
@@ -1688,8 +1648,31 @@ class MainWindow:
         if not self.current_recording:
             self.recording_controls.reset()
             self.progress_frame.reset()
-            messagebox.showerror("Error", "No recording to process.")
+            error = getattr(self.recorder, "last_error", None)
+            messagebox.showerror(
+                "Error",
+                error or "No recording to process.",
+            )
             return
+
+        # Warn (but don't block) if the captured audio looks silent — this is
+        # the common symptom when an input device doesn't actually receive sound.
+        if getattr(self.recorder, "was_silent", False):
+            peak = getattr(self.recorder, "peak_amplitude", 0)
+            proceed = messagebox.askyesno(
+                "Silent recording detected",
+                "The recording appears to contain no sound "
+                f"(peak level {peak}).\n\n"
+                "This usually means the selected input device isn't receiving "
+                "audio. For example, a headset's speaker side or an output-only "
+                "device can't capture sound, and capturing meeting/system audio "
+                "requires a loopback device (e.g. BlackHole) selected as input.\n\n"
+                "Transcription will likely be empty. Process it anyway?",
+            )
+            if not proceed:
+                self.recording_controls.reset()
+                self.progress_frame.reset()
+                return
         
         # Process the recording in a separate thread
         self.progress_frame.update_progress("Processing recording...", 10)
