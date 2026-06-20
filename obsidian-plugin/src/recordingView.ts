@@ -7,7 +7,7 @@
 import { ItemView, Notice, WorkspaceLeaf, normalizePath, TFile } from "obsidian";
 import type MeetingNotesPlugin from "./main";
 import { Recorder, type InputDevice } from "./recorder";
-import { Transcriber } from "./transcriber";
+import { Transcriber, WHISPER_SAMPLE_RATE } from "./transcriber";
 import { NotesGenerator } from "./notesGenerator";
 import type { Caption } from "./types";
 
@@ -207,6 +207,25 @@ export class RecordingView extends ItemView {
       return;
     }
 
+    // Silence guard: detect a dead/wrong input device before wasting a slow
+    // transcription pass. Peak amplitude near zero means the selected device
+    // captured nothing audible (common with loopback/headphone inputs).
+    const peak = peakAmplitude(audio);
+    const durationSec = audio.length / WHISPER_SAMPLE_RATE;
+    if (peak < 0.005) {
+      new Notice(
+        `Recording was silent (peak ${peak.toFixed(4)}, ${durationSec.toFixed(1)}s). ` +
+          `Check the Input device — pick the source that actually carries the meeting audio ` +
+          `(e.g. your mic, or a loopback device like BlackHole for system audio).`,
+        12000,
+      );
+      this.setStatus(
+        `Silent recording — no audible signal from the selected input (peak ${peak.toFixed(4)}).`,
+      );
+      this.resetIdle();
+      return;
+    }
+
     // Full, accurate final transcription pass over the whole recording.
     let finalCaptions: Caption[] = [];
     try {
@@ -395,4 +414,14 @@ function formatStamp(date: Date): string {
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/** Peak absolute amplitude over a buffer — for silence detection. */
+function peakAmplitude(audio: Float32Array): number {
+  let peak = 0;
+  for (let i = 0; i < audio.length; i++) {
+    const a = Math.abs(audio[i]);
+    if (a > peak) peak = a;
+  }
+  return peak;
 }
