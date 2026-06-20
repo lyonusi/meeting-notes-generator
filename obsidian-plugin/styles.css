@@ -1,0 +1,59 @@
+/* Meeting Notes Generator — plugin view styles */
+
+.mng-view {
+  padding: 0.5rem 0.75rem;
+}
+
+.mng-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.mng-row select {
+  width: 100%;
+}
+
+.mng-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.mng-controls button {
+  flex: 1;
+}
+
+.mng-status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0.75rem;
+}
+
+.mng-captions {
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--background-secondary);
+}
+
+.mng-caption {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-bottom: 0.25rem;
+  color: var(--text-normal);
+}
+
+.mng-caption.mng-interim {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.mng-empty {
+  color: var(--text-faint);
+  font-size: 0.85rem;
+  text-align: center;
+}

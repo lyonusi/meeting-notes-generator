@@ -1,0 +1,10 @@
+{
+  "id": "meeting-notes-generator",
+  "name": "Meeting Notes Generator",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Record meetings, transcribe locally with Whisper (WASM), and generate structured notes with AWS Bedrock — all inside your vault.",
+  "author": "lyonusi",
+  "authorUrl": "https://github.com/lyonusi/meeting-notes-generator",
+  "isDesktopOnly": true
+}
