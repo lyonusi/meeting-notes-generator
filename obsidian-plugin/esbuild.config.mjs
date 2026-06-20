@@ -55,7 +55,14 @@ const context = await esbuild.context({
   sourcemap: production ? false : "inline",
   treeShaking: true,
   outfile: "main.js",
-  define: { "process.env.NODE_ENV": production ? '"production"' : '"development"' },
+  define: {
+    "process.env.NODE_ENV": production ? '"production"' : '"development"',
+    // transformers.js computes a "local" path from `import.meta.url`, which is
+    // undefined in a CJS bundle and crashes `fileURLToPath`. Define it to a
+    // dummy file URL so that call succeeds; we force remote models at runtime
+    // (env.allowLocalModels = false), so the computed local paths are unused.
+    "import.meta.url": '"file:///obsidian-plugin/main.js"',
+  },
 });
 
 if (production) {
