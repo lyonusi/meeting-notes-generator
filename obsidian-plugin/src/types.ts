@@ -40,7 +40,7 @@ export interface MeetingNotesSettings {
 /** Default settings applied on first install. */
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   notesFolder: "Meeting Notes",
-  whisperModel: "base",
+  whisperModel: "tiny",
   awsRegion: "us-west-2",
   bedrockModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
   awsProfile: "bedrock",

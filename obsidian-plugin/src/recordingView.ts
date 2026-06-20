@@ -13,9 +13,6 @@ import type { Caption } from "./types";
 
 export const VIEW_TYPE_MEETING_NOTES = "meeting-notes-recorder";
 
-/** How often (ms) the live windowing loop transcribes the latest audio. */
-const LIVE_INTERVAL_MS = 6000;
-
 type RecState = "idle" | "recording" | "paused" | "processing";
 
 export class RecordingView extends ItemView {
@@ -25,7 +22,6 @@ export class RecordingView extends ItemView {
 
   private state: RecState = "idle";
   private captions: Caption[] = [];
-  private liveTimer: number | null = null;
   private startedAt: Date | null = null;
 
   // UI refs
@@ -82,14 +78,13 @@ export class RecordingView extends ItemView {
     this.statusEl = root.createDiv({ cls: "mng-status" });
 
     // Captions
-    root.createEl("h4", { text: "Live captions" });
+    root.createEl("h4", { text: "Transcript" });
     this.captionsEl = root.createDiv({ cls: "mng-captions" });
 
     this.renderState();
   }
 
   async onClose(): Promise<void> {
-    this.stopLiveLoop();
     if (this.recorder.isRecording) {
       await this.recorder.stop();
     }
@@ -148,7 +143,10 @@ export class RecordingView extends ItemView {
     }
     this.startedAt = new Date();
     this.state = "recording";
-    this.startLiveLoop();
+    // NOTE: We intentionally do NOT run a live windowing loop. Whisper WASM
+    // inference runs on the main thread and blocks Obsidian's UI; re-running it
+    // every few seconds stacks passes and freezes the app. Instead we capture
+    // audio silently and run a single transcription pass when the user stops.
     this.renderState();
   }
 
@@ -165,10 +163,9 @@ export class RecordingView extends ItemView {
 
   private async handleStop(): Promise<void> {
     if (this.state !== "recording" && this.state !== "paused") return;
-    this.stopLiveLoop();
     this.state = "processing";
     this.renderState();
-    this.setStatus("Finalizing transcript…");
+    this.setStatus("Finalizing transcript… (this may take a moment)");
 
     let audio: Float32Array;
     try {
@@ -224,38 +221,6 @@ export class RecordingView extends ItemView {
     }
 
     this.resetIdle();
-  }
-
-  // ------------------------------------------------------------------
-  // Live windowing loop
-  // ------------------------------------------------------------------
-
-  private startLiveLoop(): void {
-    this.stopLiveLoop();
-    this.liveTimer = window.setInterval(() => {
-      void this.runLiveWindow();
-    }, LIVE_INTERVAL_MS);
-  }
-
-  private stopLiveLoop(): void {
-    if (this.liveTimer !== null) {
-      window.clearInterval(this.liveTimer);
-      this.liveTimer = null;
-    }
-  }
-
-  private async runLiveWindow(): Promise<void> {
-    if (this.state !== "recording") return;
-    const snapshot = this.recorder.snapshot16k();
-    if (snapshot.length === 0) return;
-    try {
-      const caps = await this.transcriber.transcribe(snapshot, 0, "interim");
-      // Replace the live view with the latest interim pass.
-      this.captions = caps;
-      this.renderCaptions();
-    } catch {
-      // A failed window is non-fatal; keep going.
-    }
   }
 
   // ------------------------------------------------------------------
@@ -326,7 +291,7 @@ export class RecordingView extends ItemView {
 
     const labels: Record<RecState, string> = {
       idle: "Idle",
-      recording: "● Recording…",
+      recording: "● Recording… (transcribes when you press Stop)",
       paused: "Paused",
       processing: "Processing…",
     };
@@ -337,7 +302,7 @@ export class RecordingView extends ItemView {
     this.captionsEl.empty();
     if (this.captions.length === 0) {
       this.captionsEl.createEl("p", {
-        text: "Captions will appear here as you speak.",
+        text: "The transcript will appear here after you press Stop.",
         cls: "mng-empty",
       });
       return;
