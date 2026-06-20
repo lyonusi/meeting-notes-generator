@@ -38,10 +38,17 @@ const context = await esbuild.context({
     "@lezer/highlight",
     "@lezer/lr",
     // transformers.js optionally pulls in native deps not used for audio.
-    "onnxruntime-node",
     "sharp",
     ...nodeExternals,
   ],
+  // Obsidian's Electron renderer is detected as "node" by transformers.js, so
+  // its backend does `import 'onnxruntime-node'`. We don't ship native
+  // binaries — alias it to the WASM `onnxruntime-web` runtime so the import
+  // resolves and is bundled (must NOT also be in `external`, or it becomes a
+  // failing runtime require).
+  alias: {
+    "onnxruntime-node": "onnxruntime-web",
+  },
   format: "cjs",
   target: "es2020",
   logLevel: "info",
