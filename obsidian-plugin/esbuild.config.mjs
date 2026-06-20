@@ -33,13 +33,18 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    // transformers.js optionally pulls in native deps; exclude them so esbuild
-    // doesn't try to bundle .node binaries. The WASM (onnxruntime-web) path is
-    // used at runtime instead.
-    "onnxruntime-node",
+    // transformers.js optionally pulls in `sharp` (image processing); not used
+    // for audio, so exclude it.
     "sharp",
     ...nodeExternals,
   ],
+  // Obsidian's Electron renderer reports as a "node" environment, so
+  // transformers.js tries to import the native `onnxruntime-node`. We don't
+  // bundle native binaries — alias it to the WASM `onnxruntime-web` runtime so
+  // the import resolves and Whisper runs in WASM.
+  alias: {
+    "onnxruntime-node": "onnxruntime-web",
+  },
   format: "cjs",
   platform: "node",
   target: "es2020",

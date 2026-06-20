@@ -54,6 +54,18 @@ export class Transcriber {
       const { pipeline, env } = await import("@xenova/transformers");
       // Use the remote hub model; cache in the browser (IndexedDB) by default.
       env.allowLocalModels = false;
+      // Obsidian's Electron renderer is detected as "node" by transformers.js,
+      // but we run the WASM (onnxruntime-web) runtime (aliased at build time).
+      // Point the WASM binaries at the CDN so they resolve regardless of the
+      // plugin's on-disk location, and disable multi-threading (no COOP/COEP
+      // cross-origin isolation headers inside Obsidian).
+      try {
+        env.backends.onnx.wasm.wasmPaths =
+          "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/";
+        env.backends.onnx.wasm.numThreads = 1;
+      } catch {
+        // Older/newer env shapes — best effort; defaults still work online.
+      }
       const asr = (await pipeline(
         "automatic-speech-recognition",
         MODEL_IDS[this.modelSize],
