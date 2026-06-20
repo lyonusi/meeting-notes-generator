@@ -1,14 +1,17 @@
 /**
  * Generate structured meeting notes from a transcript using AWS Bedrock
- * (Anthropic Claude via the Messages API). Runs in the Obsidian Electron
- * renderer using the AWS SDK v3, which performs SigV4 signing in TypeScript —
- * no Python backend required.
+ * (Anthropic Claude via the Messages API).
  *
- * Credentials come from the shared AWS config (~/.aws) via the SDK's default
- * provider chain; an optional named profile can be selected in settings.
+ * Instead of the heavyweight AWS SDK (which forces a node-platform bundle and
+ * conflicts with onnxruntime-web), this signs a single SigV4 POST with Web
+ * Crypto and sends it via Obsidian's `requestUrl` (which bypasses browser CORS
+ * restrictions in the Electron renderer).
  */
 
+import { requestUrl } from "obsidian";
 import type { MeetingNotesSettings } from "./types";
+import { resolveAwsCredentials } from "./awsCredentials";
+import { signPost } from "./sigv4";
 
 /** The prompt mirrors the desktop app's notes structure. */
 function buildPrompt(transcript: string): string {
@@ -48,43 +51,51 @@ export class NotesGenerator {
       throw new Error("Cannot generate notes from an empty transcript.");
     }
 
-    const { BedrockRuntimeClient, InvokeModelCommand } = await import(
-      "@aws-sdk/client-bedrock-runtime"
-    );
-    const { fromIni } = await import("@aws-sdk/credential-providers");
+    const region = this.settings.awsRegion || "us-west-2";
+    const creds = resolveAwsCredentials(this.settings.awsProfile, region);
+    if (!creds) {
+      throw new Error(
+        `No AWS credentials found for profile "${this.settings.awsProfile}". ` +
+          "Add static keys to ~/.aws/credentials.",
+      );
+    }
+    const effectiveRegion = creds.region || region;
 
-    const client = new BedrockRuntimeClient({
-      region: this.settings.awsRegion,
-      credentials: this.settings.awsProfile
-        ? fromIni({ profile: this.settings.awsProfile })
-        : undefined,
-    });
+    const modelId = this.resolveModelId(this.settings.bedrockModelId, effectiveRegion);
+    const host = `bedrock-runtime.${effectiveRegion}.amazonaws.com`;
+    const path = `/model/${encodeURIComponent(modelId)}/invoke`;
 
-    const body = {
+    const body = JSON.stringify({
       anthropic_version: "bedrock-2023-05-31",
       max_tokens: 2000,
       messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: buildPrompt(transcript) }],
-        },
+        { role: "user", content: [{ type: "text", text: buildPrompt(transcript) }] },
       ],
-    };
-
-    // Newer Claude models require an inference profile; the cross-region
-    // "us." profile prefix is the common default in us-* regions.
-    const modelId = this.resolveModelId(this.settings.bedrockModelId);
-
-    const command = new InvokeModelCommand({
-      modelId,
-      contentType: "application/json",
-      accept: "application/json",
-      body: JSON.stringify(body),
     });
 
-    const response = await client.send(command);
-    const decoded = new TextDecoder().decode(response.body as Uint8Array);
-    const payload = JSON.parse(decoded) as {
+    const signed = await signPost({
+      region: effectiveRegion,
+      service: "bedrock",
+      host,
+      path,
+      body,
+      creds,
+    });
+
+    const response = await requestUrl({
+      url: signed.url,
+      method: "POST",
+      headers: signed.headers,
+      body: signed.body,
+      throw: false,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      const detail = this.extractError(response.text);
+      throw new Error(`Bedrock returned ${response.status}: ${detail}`);
+    }
+
+    const payload = response.json as {
       content?: Array<{ type: string; text?: string }>;
     };
     const text = (payload.content ?? [])
@@ -99,17 +110,25 @@ export class NotesGenerator {
     return text;
   }
 
+  /** Pull a human-readable message out of a Bedrock error body, if present. */
+  private extractError(text: string): string {
+    try {
+      const obj = JSON.parse(text) as { message?: string; Message?: string };
+      return obj.message ?? obj.Message ?? text;
+    } catch {
+      return text || "unknown error";
+    }
+  }
+
   /**
    * Prefix the model id with the cross-region inference-profile prefix when it
    * looks like a profile-only model. Falls back to the raw id otherwise.
    */
-  private resolveModelId(modelId: string): string {
-    // If the user already provided an ARN or a profile-prefixed id, use as-is.
-    if (modelId.startsWith("arn:") || modelId.startsWith("us.")) return modelId;
-    // Region groups map to inference-profile prefixes; us-* -> "us."
-    if (this.settings.awsRegion.startsWith("us-")) return `us.${modelId}`;
-    if (this.settings.awsRegion.startsWith("eu-")) return `eu.${modelId}`;
-    if (this.settings.awsRegion.startsWith("ap-")) return `apac.${modelId}`;
+  private resolveModelId(modelId: string, region: string): string {
+    if (modelId.startsWith("arn:") || /^(us|eu|apac)\./.test(modelId)) return modelId;
+    if (region.startsWith("us-")) return `us.${modelId}`;
+    if (region.startsWith("eu-")) return `eu.${modelId}`;
+    if (region.startsWith("ap-")) return `apac.${modelId}`;
     return modelId;
   }
 }
