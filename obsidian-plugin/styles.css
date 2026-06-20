@@ -57,3 +57,45 @@
   font-size: 0.85rem;
   text-align: center;
 }
+
+.mng-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.mng-section-header h4 {
+  margin: 0;
+}
+
+.mng-copy-btn {
+  font-size: 0.75rem;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.mng-copy-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mng-notes {
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--background-secondary);
+}
+
+.mng-notes-text {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  background: transparent;
+}

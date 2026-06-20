@@ -24,6 +24,10 @@ export class RecordingView extends ItemView {
   private captions: Caption[] = [];
   private startedAt: Date | null = null;
 
+  // Latest results, kept so the copy buttons have something to copy.
+  private lastTranscript = "";
+  private lastNotes: string | null = null;
+
   // UI refs
   private deviceSelect!: HTMLSelectElement;
   private statusEl!: HTMLElement;
@@ -31,6 +35,9 @@ export class RecordingView extends ItemView {
   private startBtn!: HTMLButtonElement;
   private pauseBtn!: HTMLButtonElement;
   private stopBtn!: HTMLButtonElement;
+  private notesEl!: HTMLElement;
+  private copyTranscriptBtn!: HTMLButtonElement;
+  private copyNotesBtn!: HTMLButtonElement;
 
   constructor(leaf: WorkspaceLeaf, plugin: MeetingNotesPlugin) {
     super(leaf);
@@ -78,10 +85,28 @@ export class RecordingView extends ItemView {
     this.statusEl = root.createDiv({ cls: "mng-status" });
 
     // Captions
-    root.createEl("h4", { text: "Transcript" });
+    const transcriptHeader = root.createDiv({ cls: "mng-section-header" });
+    transcriptHeader.createEl("h4", { text: "Transcript" });
+    this.copyTranscriptBtn = transcriptHeader.createEl("button", {
+      text: "Copy",
+      cls: "mng-copy-btn",
+    });
+    this.copyTranscriptBtn.onclick = () => void this.copyToClipboard(this.lastTranscript, "Transcript");
     this.captionsEl = root.createDiv({ cls: "mng-captions" });
 
+    // Notes
+    const notesHeader = root.createDiv({ cls: "mng-section-header" });
+    notesHeader.createEl("h4", { text: "Notes" });
+    this.copyNotesBtn = notesHeader.createEl("button", {
+      text: "Copy",
+      cls: "mng-copy-btn",
+    });
+    this.copyNotesBtn.onclick = () => void this.copyToClipboard(this.lastNotes ?? "", "Notes");
+    this.notesEl = root.createDiv({ cls: "mng-notes" });
+
     this.renderState();
+    this.renderCaptions();
+    this.renderNotes();
   }
 
   async onClose(): Promise<void> {
@@ -195,6 +220,7 @@ export class RecordingView extends ItemView {
     this.renderCaptions();
 
     const transcript = this.captions.map((c) => c.text).join(" ").trim();
+    this.lastTranscript = transcript;
     if (!transcript) {
       new Notice("Transcript was empty — nothing to save.");
       this.resetIdle();
@@ -211,6 +237,8 @@ export class RecordingView extends ItemView {
       new Notice(`Notes generation failed: ${errMessage(err)}. Saving transcript only.`);
       notes = null;
     }
+    this.lastNotes = notes;
+    this.renderNotes();
 
     try {
       const file = await this.saveNote(transcript, notes);
@@ -305,6 +333,7 @@ export class RecordingView extends ItemView {
         text: "The transcript will appear here after you press Stop.",
         cls: "mng-empty",
       });
+      this.updateCopyButtons();
       return;
     }
     for (const cap of this.captions) {
@@ -313,6 +342,45 @@ export class RecordingView extends ItemView {
       line.setText(cap.text);
     }
     this.captionsEl.scrollTop = this.captionsEl.scrollHeight;
+    this.updateCopyButtons();
+  }
+
+  private renderNotes(): void {
+    this.notesEl.empty();
+    if (!this.lastNotes) {
+      this.notesEl.createEl("p", {
+        text: "AI-generated notes will appear here after you press Stop.",
+        cls: "mng-empty",
+      });
+      this.updateCopyButtons();
+      return;
+    }
+    // Render notes as plain text in a pre block so markdown is copy-friendly.
+    const pre = this.notesEl.createEl("pre", { cls: "mng-notes-text" });
+    pre.setText(this.lastNotes);
+    this.updateCopyButtons();
+  }
+
+  private updateCopyButtons(): void {
+    if (this.copyTranscriptBtn) {
+      this.copyTranscriptBtn.disabled = !this.lastTranscript;
+    }
+    if (this.copyNotesBtn) {
+      this.copyNotesBtn.disabled = !this.lastNotes;
+    }
+  }
+
+  private async copyToClipboard(text: string, label: string): Promise<void> {
+    if (!text) {
+      new Notice(`No ${label.toLowerCase()} to copy yet.`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      new Notice(`${label} copied to clipboard.`);
+    } catch (err) {
+      new Notice(`Could not copy ${label.toLowerCase()}: ${errMessage(err)}`);
+    }
   }
 }
 
