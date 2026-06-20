@@ -16,3 +16,14 @@ faster-whisper>=0.9.0
 
 # The following dependencies are typically included with Python but listed for completeness
 # tkinter (built-in)
+
+# Web backend (live-transcription-web-ui spec)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+websockets>=12.0
+
+# Backend testing
+hypothesis>=6.100.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0

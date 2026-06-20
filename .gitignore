@@ -57,3 +57,6 @@ New Folder With Items/
 
 # External git repositories
 whisper/
+
+# Pytest cache
+.pytest_cache/

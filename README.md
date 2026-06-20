@@ -1,43 +1,59 @@
 # Meeting Notes Generator
 
-A macOS application that records audio during meetings and automatically generates structured meeting notes with comprehensive version management capabilities.
+A macOS application that records audio during meetings and automatically generates
+structured meeting notes. It ships with **two interfaces** that share the same storage:
+
+1. **Web UI** (recommended) — a modern browser app with **live transcription** while you
+   record, backed by a FastAPI server. See [Web UI](#web-ui-recommended).
+2. **Desktop UI** — the original tkinter application. See [Desktop UI (tkinter)](#desktop-ui-tkinter).
 
 ## Features
 
-- Record audio from both microphone and system output during meetings
-- Transcribe meetings using AWS Transcribe or local Whisper
-- Generate structured meeting notes using AWS Bedrock
+- Record audio from a microphone or system output (via a loopback device) during meetings
+- **Live transcription** — see captions stream in while you record (web UI)
+- Transcribe meetings using local Whisper (faster-whisper), AWS Transcribe, or macOS speech
+- Generate structured meeting notes using AWS Bedrock (Anthropic Claude)
 - Store meeting notes and full transcripts
-- Simple UI to start, pause, resume, and stop recordings
-- Retry transcription if it fails with different services
-- Regenerate notes with different AI models
-- **Version management system for notes and transcriptions**:
-  - Track multiple versions of notes and transcripts
-  - Compare different versions side-by-side with diff highlighting
-  - Visual timeline of version history
-  - Mark default versions for each meeting
-  - Add comments to versions for context
-- **Direct editing capabilities**:
-  - Edit notes directly in the interface
-  - Save changes with keyboard shortcuts (Ctrl+S/⌘S)
-  - Auto-versioning on regeneration or retranscription
-- **Enhanced batch operations**:
-  - Select multiple meetings at once
-  - Delete/manage in batches
+- Start, pause, resume, and stop recordings with input-device validation and
+  silent-recording detection
+- Retry transcription with different services; regenerate notes with different AI models
+- **Version management** for notes: multiple versions per meeting, default version,
+  side-by-side diff (desktop UI), version selector (web UI)
+- Both UIs read/write the same `notes/` and `recordings/` folders, so you can switch freely
+
+## Architecture
+
+```
+main.py            → Desktop (tkinter) entry point
+webapp/backend/    → FastAPI server (HTTP + WebSocket) wrapping the core modules
+webapp/frontend/   → React + Tailwind single-page app (the web UI)
+
+Shared core modules (used by both UIs):
+  audio_capture.py        → AudioRecorder (device selection, capture, silence detection)
+  transcription.py        → Whisper / AWS / macOS transcription services
+  notes_generator.py      → notes generation via AWS Bedrock
+  aws_services.py         → Bedrock + Transcribe + S3 helpers
+  version_manager.py      → notes/transcript versioning + metadata
+  config.py               → AWS region, model ids, audio + transcription settings
+```
+
+The web backend is a thin orchestration layer: it reuses the existing core modules rather
+than reimplementing them, so behaviour stays consistent between the two UIs.
 
 ## Requirements
 
-- Python 3.7+
-- For AWS services (optional):
+- Python 3.9+ (3.13 tested)
+- Node.js 18+ and npm (only for the web UI frontend)
+- For AWS services (optional, needed for notes generation):
   - AWS Account with access to:
-    - AWS Transcribe
-    - AWS Bedrock (with Anthropic Claude models enabled)
-    - Amazon S3
+    - AWS Bedrock (with Anthropic Claude models enabled) — for notes generation
+    - AWS Transcribe + Amazon S3 — only if you use the `aws` transcription service
   - Valid AWS credentials
-  - Inference profiles for newer Claude models (Claude Sonnet 4, Claude 3.7)
-- For local transcription:
-  - OpenAI Whisper (included in requirements.txt)
-  - faster-whisper (included in requirements.txt)
+  - An **active** Claude model (deprecated/"Legacy" models are rejected by Bedrock; set
+    an active model id in `config.py` / the web UI Configuration panel)
+- For local transcription (no AWS needed):
+  - faster-whisper / openai-whisper (included in requirements.txt); models download to
+    `~/.cache/huggingface/hub` on first use
 
 ## Installation
 
@@ -109,9 +125,56 @@ To capture system audio on macOS, you'll need a virtual audio device:
 3. In the Meeting Notes Generator app:
    - Select "BlackHole 2ch" as your input device
 
+## Web UI (recommended)
+
+The web UI runs as a local FastAPI backend plus a React frontend. It adds **live
+transcription** (captions stream while you record) and a cleaner two-page interface:
+
+- **Record** — device selection, start/pause/stop, live captions; a ⚙ Settings drawer
+  holds transcription/model configuration.
+- **Meetings** — a master–detail view: meeting list on the left, the selected meeting's
+  notes + transcript on the right, with a "Generate Notes" / "Regenerate" action and a
+  version selector.
+
+### Start the backend
+
+```bash
+cd meeting-notes-generator
+# from the project root, with the venv active / deps installed:
+python -m uvicorn webapp.backend.app:app --reload
+# serves on http://127.0.0.1:8000  (use --port 8077 if 8000 is taken)
+```
+
+### Start the frontend
+
+```bash
+cd webapp/frontend
+npm install          # first time only
+npm run dev          # serves the UI (Vite prints the URL, e.g. http://localhost:5173)
+```
+
+The Vite dev server proxies `/api` and `/ws` to the backend, so just open the printed
+URL. For a production build: `npm run build` (output in `webapp/frontend/dist/`, which the
+backend will serve at `/` if present).
+
+### Typical flow
+
+1. Open the UI, go to **Record**, pick your input device (see
+   [Recording System Audio on macOS](#recording-system-audio-on-macos) to capture meeting
+   audio), and click **Start**. Captions stream live.
+2. Click **Stop** — a full accurate transcription pass runs and becomes the authoritative
+   transcript.
+3. Go to **Meetings**, select the meeting, click **Generate Notes**, then **Save** to keep
+   them as a version. Edit and re-save to create further versions.
+
+> Notes generation requires AWS Bedrock with an active Claude model. Live captions and the
+> final transcript use local Whisper and need no AWS.
+
 ## Usage
 
-### Starting the application
+### Desktop UI (tkinter)
+
+Start the application:
 
 ```bash
 cd meeting-notes-generator
@@ -261,14 +324,29 @@ For notes generation without external services, consider:
 ## Future Enhancements
 
 - Automatic meeting detection (for common meeting apps)
-- Real-time transcription and notes
 - Meeting app integration
-- Native macOS app with improved UI
 - Enhanced audio processing
-- Integrated local AI models support
-- Version merging capabilities
-- Export version history as reports
+- Integrated local AI models support (notes generation without AWS)
+- Version merging capabilities and exportable version-history reports
 - Cloud synchronization of version metadata
+- **Obsidian plugin** packaging (see [Running inside Obsidian](#running-inside-obsidian))
+
+## Running inside Obsidian
+
+The `notes/` and `recordings/` folders are typically symlinked into an Obsidian vault, so
+generated notes already show up in Obsidian. Tighter integration (a true plugin) is
+possible — see the options and tradeoffs below.
+
+**Quick win (works today):** keep `notes/` symlinked into your vault and run the web UI
+alongside Obsidian. Generated `.md` notes appear in the vault automatically. Recordings
+(`.wav`) are kept out of the vault's git to avoid bloat.
+
+**Companion plugin (recommended next step):** a thin Obsidian plugin that talks to the
+existing FastAPI backend over HTTP/WebSocket and renders the UI in a custom view —
+reusing all current backend logic. The Python backend runs as a local helper process.
+
+**Full native plugin:** re-implement capture/transcription in TypeScript/WASM to drop the
+Python dependency. Most work; only needed for a distributable community plugin.
 
 ## License
 

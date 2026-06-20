@@ -242,8 +242,14 @@ class VersionManager:
             # Update metadata with this version
             self.create_or_update_metadata(meeting_id, version_info)
         
-        # Return the updated metadata
-        return self.get_metadata(meeting_id)
+        # Re-read the persisted metadata only if a version was actually written
+        # above (i.e. notes files were found). For a transcript-only meeting no
+        # version is written, so the metadata file does not exist yet — return
+        # the in-memory metadata directly to avoid infinite recursion back into
+        # get_metadata -> _auto_discover_metadata.
+        if os.path.exists(self.get_meeting_metadata_path(meeting_id)):
+            return self.get_metadata(meeting_id)
+        return metadata
     
     def set_default_version(self, meeting_id, version_num):
         """Set the default version for a meeting.
